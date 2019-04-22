@@ -1,0 +1,9 @@
+[package]
+name = "test_amethyst"
+version = "0.1.0"
+authors = ["Aaron Housh <ahoush@edupoint.com>"]
+edition = "2018"
+
+[dependencies]
+amethyst = { git = "https://github.com/amethyst/amethyst" }
+rand = "0.6.5"
