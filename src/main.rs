@@ -17,7 +17,7 @@ use amethyst::{
     GameData,
     prelude::{Builder, GameDataBuilder, World},
     renderer::{
-        camera::Camera,
+        camera::{Camera, Projection},
         formats::texture::ImageFormat,
         pass::DrawFlat2DDesc,
         rendy::{
@@ -25,7 +25,7 @@ use amethyst::{
                 render::{RenderGroupDesc, SubpassBuilder},
                 GraphBuilder
             },
-            hal::format::Format,
+            hal::{format::Format, image},
             factory::Factory,
         },
         sprite::{SpriteRender, SpriteSheet, SpriteSheetFormat, SpriteSheetHandle},
@@ -58,7 +58,7 @@ fn main() -> amethyst::Result<()> {
         .with_bundle(BounceBundle)?
         .with_bundle(WindowBundle::from_config_path(config_path))?
         .with_bundle(TransformBundle::new())?
-        .with_thread_local(RenderingSystem::<DefaultBackend, _>::new(ExampleGraph::new()));
+        .with_thread_local(RenderingSystem::<DefaultBackend, _>::new(ExampleGraph::default()));
 
     let mut game = Application::build(root, State)?
         .with_frame_limit(
@@ -84,20 +84,11 @@ impl<'a, 'b> SystemBundle<'a, 'b> for BounceBundle {
     }
 }
 
+#[derive(Default)]
 struct ExampleGraph {
-    last_dimensions: Option<ScreenDimensions>,
+    dimensions: Option<ScreenDimensions>,
     surface_format: Option<Format>,
     dirty: bool,
-}
-
-impl ExampleGraph {
-    pub fn new() -> Self {
-        Self {
-            last_dimensions: None,
-            surface_format: None,
-            dirty: true,
-        }
-    }
 }
 
 impl GraphCreator<DefaultBackend> for ExampleGraph {
@@ -105,9 +96,9 @@ impl GraphCreator<DefaultBackend> for ExampleGraph {
         // Rebuild when dimensions change, but wait until at least two frames have the same.
         let new_dimensions = res.try_fetch::<ScreenDimensions>();
         use std::ops::Deref;
-        if self.last_dimensions.as_ref() != new_dimensions.as_ref().map(|d| d.deref()) {
+        if self.dimensions.as_ref() != new_dimensions.as_ref().map(|d| d.deref()) {
             self.dirty = true;
-            self.last_dimensions = new_dimensions.map(|d| d.clone());
+            self.dimensions = new_dimensions.map(|d| d.clone());
             return false;
         }
         return self.dirty;
@@ -126,30 +117,34 @@ impl GraphCreator<DefaultBackend> for ExampleGraph {
         self.dirty = false;
 
         let window = <ReadExpect<'_, Arc<Window>>>::fetch(res);
-        let surface = factory.create_surface(window.clone());
+        let surface = factory.create_surface(&window);
         // cache surface format to speed things up
         let surface_format = *self
             .surface_format
             .get_or_insert_with(|| factory.get_surface_format(&surface));
 
+        let dimensions = self.dimensions.as_ref().unwrap();
+        let window_kind =
+            image::Kind::D2(dimensions.width() as u32, dimensions.height() as u32, 1, 1);
+
         let mut graph_builder = GraphBuilder::new();
         let color = graph_builder.create_image(
-            surface.kind(),
+            window_kind,
             1,
             surface_format,
             Some(ClearValue::Color([0.0, 0.0, 0.0, 1.0].into())),
         );
 
         let depth = graph_builder.create_image(
-            surface.kind(),
+            window_kind,
             1,
-            Format::D32Float,
+            Format::D32Sfloat,
             Some(ClearValue::DepthStencil(ClearDepthStencil(1.0, 0))),
         );
 
         let sprite = graph_builder.add_node(
             SubpassBuilder::new()
-                .with_group(DrawFlat2DDesc::default().builder())
+                .with_group(DrawFlat2DDesc::new().builder())
                 .with_color(color)
                 .with_depth_stencil(depth)
                 .into_pass(),
@@ -173,15 +168,22 @@ impl SimpleState for State {
 
         world
             .create_entity()
+            .with(Camera::from(Projection::orthographic(
+                0.,
+                ARENA_WIDTH,
+                0.,
+                ARENA_HEIGHT,
+                0.1,
+                2000.0,
+            )))
             .with(camera_transform)
-            .with(Camera::standard_2d(ARENA_WIDTH, ARENA_HEIGHT))
             .build();
 
         let sprite_sheet_handle = load_sprite_sheet(world);
 
         let mut rng = rand::thread_rng();
 
-        for _ in 0..200_000 {
+        for _ in 0..50_000 {
             let mut ball_transform = Transform::default();
             let x = ARENA_WIDTH / 2.0;
             let y = ARENA_HEIGHT / 2.0;
@@ -245,9 +247,10 @@ impl<'s> System<'s> for MovementSystem {
         for (transform, velocity) in (&mut transforms, &velocities).join() {
             let transform: &mut Transform = transform;
             let velocity: &Velocity = velocity;
+            let delta_seconds = time.delta_seconds();
 
-            transform.prepend_translation_x(velocity.x * time.delta_seconds());
-            transform.prepend_translation_y(velocity.y * time.delta_seconds());
+            transform.prepend_translation_x(velocity.x * delta_seconds);
+            transform.prepend_translation_y(velocity.y * delta_seconds);
         }
     }
 }
@@ -255,17 +258,35 @@ impl<'s> System<'s> for MovementSystem {
 struct BounceSystem;
 
 impl<'s> System<'s> for BounceSystem {
-    type SystemData = (WriteStorage<'s, Velocity>, ReadStorage<'s, Transform>);
+    type SystemData = (
+        WriteStorage<'s, Velocity>,
+        WriteStorage<'s, Transform>
+    );
 
-    fn run(&mut self, (mut velocities, transforms): Self::SystemData) {
-        for (mut velocity, transform) in (&mut velocities, &transforms).join() {
-            let transform_pos = transform.translation();
+    fn run(&mut self, (mut velocities, mut transforms): Self::SystemData) {
+        for (mut velocity, transform) in (&mut velocities, &mut transforms).join() {
+            let transform: &mut Transform = transform;
 
-            if transform_pos.y >= Float::from(ARENA_HEIGHT) || transform_pos.y <= Float::from(0.0) {
+            let current_y = transform.translation().y;
+            let current_x = transform.translation().x;
+
+            if current_y >= Float::from(ARENA_HEIGHT) {
+                transform.set_translation_y(ARENA_HEIGHT - 1.0);
                 velocity.y = -velocity.y;
             }
 
-            if transform_pos.x >= Float::from(ARENA_WIDTH) || transform_pos.x <= Float::from(0.0) {
+            if current_y <= Float::from(0.0) {
+                transform.set_translation_y(0.0);
+                velocity.y = -velocity.y;
+            }
+
+            if current_x >= Float::from(ARENA_WIDTH) {
+                transform.set_translation_x(ARENA_WIDTH - 1.0);
+                velocity.x = -velocity.x;
+            }
+
+            if current_x <= Float::from(0.0) {
+                transform.set_translation_x(0.0);
                 velocity.x = -velocity.x;
             }
         }
