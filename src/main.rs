@@ -172,7 +172,7 @@ impl SimpleState for State {
                 0.,
                 ARENA_WIDTH,
                 0.,
-                ARENA_HEIGHT,
+                -ARENA_HEIGHT,
                 0.1,
                 2000.0,
             )))
