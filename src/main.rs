@@ -1,16 +1,14 @@
-use std::sync::Arc;
 use amethyst::{
     Application,
-    assets::{AssetStorage, Loader, Processor},
+    assets::{AssetStorage, Loader},
     core::{
         bundle::SystemBundle,
-        Float,
         frame_limiter::FrameRateLimitStrategy,
         timing::Time,
         transform::{Transform, TransformBundle},
     },
     ecs::{
-        prelude::{DispatcherBuilder}, Component, DenseVecStorage, Join, Read, ReadExpect, Resources, ReadStorage, System, SystemData,
+        prelude::{DispatcherBuilder}, Component, DenseVecStorage, Join, Read, ReadStorage, System,
         WriteStorage,
     },
     error::Error,
@@ -18,19 +16,10 @@ use amethyst::{
     prelude::{Builder, GameDataBuilder, World},
     renderer::{
         camera::{Camera, Projection},
+        plugins::{RenderFlat2D, RenderToWindow},
+        RenderingBundle,
         formats::texture::ImageFormat,
-        pass::DrawFlat2DDesc,
-        rendy::{
-            graph::{
-                render::{RenderGroupDesc, SubpassBuilder},
-                GraphBuilder
-            },
-            hal::{format::Format, image},
-            factory::Factory,
-        },
         sprite::{SpriteRender, SpriteSheet, SpriteSheetFormat, SpriteSheetHandle},
-        RenderingSystem,
-        GraphCreator,
         Texture,
         types::DefaultBackend,
     },
@@ -39,7 +28,6 @@ use amethyst::{
     utils::{
         application_root_dir,
     },
-    window::{ScreenDimensions, WindowBundle, Window},
 };
 use rand::Rng;
 use std::time::Duration;
@@ -56,9 +44,15 @@ fn main() -> amethyst::Result<()> {
 
     let game_data = GameDataBuilder::default()
         .with_bundle(BounceBundle)?
-        .with_bundle(WindowBundle::from_config_path(config_path))?
         .with_bundle(TransformBundle::new())?
-        .with_thread_local(RenderingSystem::<DefaultBackend, _>::new(ExampleGraph::default()));
+        .with_bundle(
+            RenderingBundle::<DefaultBackend>::new()
+                .with_plugin(
+                    RenderToWindow::from_config_path(config_path)
+                        .with_clear([0.0, 0.0, 0.0, 1.0])
+                )
+                .with_plugin(RenderFlat2D::default()),
+        )?;
 
     let mut game = Application::build(root, State)?
         .with_frame_limit(
@@ -78,82 +72,8 @@ impl<'a, 'b> SystemBundle<'a, 'b> for BounceBundle {
     fn build(self, builder: &mut DispatcherBuilder<'a, 'b>) -> Result<(), Error> {
         builder.add(MovementSystem, "movement_system", &[]);
         builder.add(BounceSystem, "bounce_system", &[]);
-        builder.add(Processor::<SpriteSheet>::new(), "sprite_sheet_processor", &[]);
 
         Ok(())
-    }
-}
-
-#[derive(Default)]
-struct ExampleGraph {
-    dimensions: Option<ScreenDimensions>,
-    surface_format: Option<Format>,
-    dirty: bool,
-}
-
-impl GraphCreator<DefaultBackend> for ExampleGraph {
-    fn rebuild(&mut self, res: &Resources) -> bool {
-        // Rebuild when dimensions change, but wait until at least two frames have the same.
-        let new_dimensions = res.try_fetch::<ScreenDimensions>();
-        use std::ops::Deref;
-        if self.dimensions.as_ref() != new_dimensions.as_ref().map(|d| d.deref()) {
-            self.dirty = true;
-            self.dimensions = new_dimensions.map(|d| d.clone());
-            return false;
-        }
-        return self.dirty;
-    }
-
-    fn builder(
-        &mut self,
-        factory: &mut Factory<DefaultBackend>,
-        res: &Resources,
-    ) -> GraphBuilder<DefaultBackend, Resources> {
-        use amethyst::renderer::rendy::{
-            graph::present::PresentNode,
-            hal::command::{ClearDepthStencil, ClearValue},
-        };
-
-        self.dirty = false;
-
-        let window = <ReadExpect<'_, Arc<Window>>>::fetch(res);
-        let surface = factory.create_surface(&window);
-        // cache surface format to speed things up
-        let surface_format = *self
-            .surface_format
-            .get_or_insert_with(|| factory.get_surface_format(&surface));
-
-        let dimensions = self.dimensions.as_ref().unwrap();
-        let window_kind =
-            image::Kind::D2(dimensions.width() as u32, dimensions.height() as u32, 1, 1);
-
-        let mut graph_builder = GraphBuilder::new();
-        let color = graph_builder.create_image(
-            window_kind,
-            1,
-            surface_format,
-            Some(ClearValue::Color([0.0, 0.0, 0.0, 1.0].into())),
-        );
-
-        let depth = graph_builder.create_image(
-            window_kind,
-            1,
-            Format::D32Sfloat,
-            Some(ClearValue::DepthStencil(ClearDepthStencil(1.0, 0))),
-        );
-
-        let sprite = graph_builder.add_node(
-            SubpassBuilder::new()
-                .with_group(DrawFlat2DDesc::new().builder())
-                .with_color(color)
-                .with_depth_stencil(depth)
-                .into_pass(),
-        );
-
-        let _present = graph_builder
-            .add_node(PresentNode::builder(factory, surface, color).with_dependency(sprite));
-
-        graph_builder
     }
 }
 
@@ -270,22 +190,22 @@ impl<'s> System<'s> for BounceSystem {
             let current_y = transform.translation().y;
             let current_x = transform.translation().x;
 
-            if current_y >= Float::from(ARENA_HEIGHT) {
+            if current_y >= ARENA_HEIGHT {
                 transform.set_translation_y(ARENA_HEIGHT - 1.0);
                 velocity.y = -velocity.y;
             }
 
-            if current_y <= Float::from(0.0) {
+            if current_y <= 0.0 {
                 transform.set_translation_y(0.0);
                 velocity.y = -velocity.y;
             }
 
-            if current_x >= Float::from(ARENA_WIDTH) {
+            if current_x >= ARENA_WIDTH {
                 transform.set_translation_x(ARENA_WIDTH - 1.0);
                 velocity.x = -velocity.x;
             }
 
-            if current_x <= Float::from(0.0) {
+            if current_x <= 0.0 {
                 transform.set_translation_x(0.0);
                 velocity.x = -velocity.x;
             }
