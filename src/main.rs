@@ -20,7 +20,7 @@ use amethyst::{
         types::DefaultBackend,
         RenderingBundle, Texture,
     },
-    utils::application_root_dir,
+    utils::{application_root_dir, auto_fov::{AutoFovSystem, AutoFov}},
     Application, GameData, SimpleState, StateData,
 };
 use rand::Rng;
@@ -65,6 +65,7 @@ impl<'a, 'b> SystemBundle<'a, 'b> for BounceBundle {
     fn build(self, builder: &mut DispatcherBuilder<'a, 'b>) -> Result<(), Error> {
         builder.add(MovementSystem, "movement_system", &[]);
         builder.add(BounceSystem, "bounce_system", &[]);
+        builder.add(AutoFovSystem::default(), "auto_fov", &[]);
 
         Ok(())
     }
@@ -79,6 +80,10 @@ impl SimpleState for State {
         let mut camera_transform = Transform::default();
         camera_transform.set_translation_z(1.0);
 
+        let mut auto_fov = AutoFov::default();
+        auto_fov.set_base_fovx(1.361356817);
+        auto_fov.set_base_aspect_ratio(13, 10);
+
         world
             .create_entity()
             .with(Camera::from(Projection::orthographic(
@@ -89,6 +94,7 @@ impl SimpleState for State {
                 0.1,
                 2000.0,
             )))
+            .with(auto_fov)
             .with(camera_transform)
             .build();
 
