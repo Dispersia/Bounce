@@ -1,5 +1,4 @@
 use amethyst::{
-    Application,
     assets::{AssetStorage, Loader},
     core::{
         bundle::SystemBundle,
@@ -8,26 +7,21 @@ use amethyst::{
         transform::{Transform, TransformBundle},
     },
     ecs::{
-        prelude::{DispatcherBuilder}, Component, DenseVecStorage, Join, Read, ReadStorage, System,
+        prelude::DispatcherBuilder, Component, DenseVecStorage, Join, Read, ReadStorage, System,
         WriteStorage,
     },
     error::Error,
-    GameData,
     prelude::{Builder, GameDataBuilder, World},
     renderer::{
         camera::{Camera, Projection},
-        plugins::{RenderFlat2D, RenderToWindow},
-        RenderingBundle,
         formats::texture::ImageFormat,
+        plugins::{RenderFlat2D, RenderToWindow},
         sprite::{SpriteRender, SpriteSheet, SpriteSheetFormat, SpriteSheetHandle},
-        Texture,
         types::DefaultBackend,
+        RenderingBundle, Texture,
     },
-    SimpleState,
-    StateData,
-    utils::{
-        application_root_dir,
-    },
+    utils::application_root_dir,
+    Application, GameData, SimpleState, StateData,
 };
 use rand::Rng;
 use std::time::Duration;
@@ -48,8 +42,7 @@ fn main() -> amethyst::Result<()> {
         .with_bundle(
             RenderingBundle::<DefaultBackend>::new()
                 .with_plugin(
-                    RenderToWindow::from_config_path(config_path)
-                        .with_clear([0.0, 0.0, 0.0, 1.0])
+                    RenderToWindow::from_config_path(config_path).with_clear([0.0, 0.0, 0.0, 1.0]),
                 )
                 .with_plugin(RenderFlat2D::default()),
         )?;
@@ -178,10 +171,7 @@ impl<'s> System<'s> for MovementSystem {
 struct BounceSystem;
 
 impl<'s> System<'s> for BounceSystem {
-    type SystemData = (
-        WriteStorage<'s, Velocity>,
-        WriteStorage<'s, Transform>
-    );
+    type SystemData = (WriteStorage<'s, Velocity>, WriteStorage<'s, Transform>);
 
     fn run(&mut self, (mut velocities, mut transforms): Self::SystemData) {
         for (mut velocity, transform) in (&mut velocities, &mut transforms).join() {
