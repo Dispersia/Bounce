@@ -7,8 +7,8 @@ use amethyst::{
         transform::{Transform, TransformBundle},
     },
     ecs::{
-        prelude::DispatcherBuilder, Component, DenseVecStorage, Join, Read, ReadStorage, System,
-        WriteStorage,
+        prelude::DispatcherBuilder, Component, DenseVecStorage, Join, Read, ReadExpect,
+        ReadStorage, System, WriteStorage,
     },
     error::Error,
     prelude::{Builder, GameDataBuilder, World},
@@ -20,14 +20,14 @@ use amethyst::{
         types::DefaultBackend,
         RenderingBundle, Texture,
     },
-    utils::{application_root_dir, auto_fov::{AutoFovSystem, AutoFov}},
+    utils::application_root_dir,
+    window::ScreenDimensions,
     Application, GameData, SimpleState, StateData,
 };
+
+use amethyst::prelude::WorldExt;
 use rand::Rng;
 use std::time::Duration;
-
-const ARENA_WIDTH: f32 = 1000.0;
-const ARENA_HEIGHT: f32 = 1000.0;
 
 fn main() -> amethyst::Result<()> {
     amethyst::start_logger(Default::default());
@@ -62,10 +62,14 @@ fn main() -> amethyst::Result<()> {
 struct BounceBundle;
 
 impl<'a, 'b> SystemBundle<'a, 'b> for BounceBundle {
-    fn build(self, builder: &mut DispatcherBuilder<'a, 'b>) -> Result<(), Error> {
+    fn build(
+        self,
+        _world: &mut World,
+        builder: &mut DispatcherBuilder<'a, 'b>,
+    ) -> Result<(), Error> {
+        builder.add(WindowResizeSystem::new(), "window_resize_system", &[]);
         builder.add(MovementSystem, "movement_system", &[]);
         builder.add(BounceSystem, "bounce_system", &[]);
-        builder.add(AutoFovSystem::default(), "auto_fov", &[]);
 
         Ok(())
     }
@@ -80,21 +84,13 @@ impl SimpleState for State {
         let mut camera_transform = Transform::default();
         camera_transform.set_translation_z(1.0);
 
-        let mut auto_fov = AutoFov::default();
-        auto_fov.set_base_fovx(1.361356817);
-        auto_fov.set_base_aspect_ratio(13, 10);
+        let (width, height) = get_dimensions(world);
 
         world
             .create_entity()
             .with(Camera::from(Projection::orthographic(
-                0.,
-                ARENA_WIDTH,
-                0.,
-                -ARENA_HEIGHT,
-                0.1,
-                2000.0,
+                0., width, 0., -height, 0.1, 2000.0,
             )))
-            .with(auto_fov)
             .with(camera_transform)
             .build();
 
@@ -102,10 +98,10 @@ impl SimpleState for State {
 
         let mut rng = rand::thread_rng();
 
-        for _ in 0..50_000 {
+        for _ in 0..100_000 {
             let mut ball_transform = Transform::default();
-            let x = ARENA_WIDTH / 2.0;
-            let y = ARENA_HEIGHT / 2.0;
+            let x = width / 2.0;
+            let y = height / 2.0;
 
             ball_transform.set_translation_xyz(x, y, 0.);
 
@@ -127,6 +123,12 @@ impl SimpleState for State {
                 .build();
         }
     }
+}
+
+fn get_dimensions(world: &mut World) -> (f32, f32) {
+    let screen_dimensions = world.read_resource::<ScreenDimensions>();
+
+    (screen_dimensions.width(), screen_dimensions.height())
 }
 
 fn load_sprite_sheet(world: &mut World) -> SpriteSheetHandle {
@@ -174,20 +176,56 @@ impl<'s> System<'s> for MovementSystem {
     }
 }
 
+struct WindowResizeSystem {
+    last_dimensions: ScreenDimensions,
+}
+
+impl WindowResizeSystem {
+    pub fn new() -> Self {
+        Self {
+            last_dimensions: ScreenDimensions::new(0, 0, 0.0),
+        }
+    }
+}
+
+impl<'s> System<'s> for WindowResizeSystem {
+    type SystemData = (ReadExpect<'s, ScreenDimensions>, WriteStorage<'s, Camera>);
+
+    fn run(&mut self, (screen_dimensions, mut cameras): Self::SystemData) {
+        if self.last_dimensions != *screen_dimensions {
+            for camera in (&mut cameras).join() {
+                if let Some(ortho) = camera.projection_mut().as_orthographic_mut() {
+                    ortho.set_bottom_and_top(0., -screen_dimensions.height());
+                    ortho.set_left_and_right(0., screen_dimensions.width());
+                }
+            }
+
+            self.last_dimensions = screen_dimensions.clone();
+        }
+    }
+}
+
 struct BounceSystem;
 
 impl<'s> System<'s> for BounceSystem {
-    type SystemData = (WriteStorage<'s, Velocity>, WriteStorage<'s, Transform>);
+    type SystemData = (
+        ReadExpect<'s, ScreenDimensions>,
+        WriteStorage<'s, Velocity>,
+        WriteStorage<'s, Transform>,
+    );
 
-    fn run(&mut self, (mut velocities, mut transforms): Self::SystemData) {
+    fn run(&mut self, (screen, mut velocities, mut transforms): Self::SystemData) {
         for (mut velocity, transform) in (&mut velocities, &mut transforms).join() {
             let transform: &mut Transform = transform;
 
             let current_y = transform.translation().y;
             let current_x = transform.translation().x;
 
-            if current_y >= ARENA_HEIGHT {
-                transform.set_translation_y(ARENA_HEIGHT - 1.0);
+            let height = screen.height();
+            let width = screen.width();
+
+            if current_y >= height {
+                transform.set_translation_y(height - 1.0);
                 velocity.y = -velocity.y;
             }
 
@@ -196,8 +234,8 @@ impl<'s> System<'s> for BounceSystem {
                 velocity.y = -velocity.y;
             }
 
-            if current_x >= ARENA_WIDTH {
-                transform.set_translation_x(ARENA_WIDTH - 1.0);
+            if current_x >= width {
+                transform.set_translation_x(width - 1.0);
                 velocity.x = -velocity.x;
             }
 

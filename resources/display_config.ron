@@ -1,5 +1,5 @@
 (
-  dimensions: Some((1000, 1000)),
+  dimensions: Some((500, 500)),
   title: "Spawn",
   visibility: true,
 )
